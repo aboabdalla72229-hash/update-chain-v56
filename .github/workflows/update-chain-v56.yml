@@ -38,13 +38,10 @@ jobs:
           echo "Searching for V1.0.56 Update Chain ZIP"
           echo "======================================"
 
-          ZIP=$(find . -maxdepth 3 -type f \
-            -iname "*1.0.56*UPDATE*CHAIN*.zip" \
-            -print -quit)
+          ZIP=$(find . -maxdepth 3 -type f -name "*.zip" -print | head -n 1)
 
           if [ -z "$ZIP" ]; then
-            echo "ERROR: Update Chain ZIP not found."
-            find . -type f -iname "*.zip" -print
+            echo "ERROR: ZIP file not found."
             exit 1
           fi
 
@@ -63,7 +60,7 @@ jobs:
         run: |
 
           echo "======================================"
-          echo "Extracting V1.0.56"
+          echo "Extracting SurveyQuant V1.0.56"
           echo "======================================"
 
           rm -rf extracted
@@ -76,11 +73,13 @@ jobs:
           echo ""
           echo "Extraction completed."
 
-          find extracted -maxdepth 5 -type f | sort | head -300
+          echo ""
+          echo "Extracted project:"
+          find extracted -maxdepth 5 -type f | head -n 300
 
 
       # ==========================================
-      # 4. Detect Gradle Project
+      # 4. Detect Android Project
       # ==========================================
 
       - name: Detect Android Project
@@ -92,62 +91,76 @@ jobs:
           echo "Detecting Android Project"
           echo "======================================"
 
-          GRADLEW=$(find extracted \
-            -type f \
-            -name "gradlew" \
-            -print \
-            -quit)
+          GRADLEW=$(find extracted -type f -name "gradlew" -print | head -n 1)
 
           if [ -n "$GRADLEW" ]; then
 
             PROJECT_DIR=$(dirname "$GRADLEW")
 
-            echo "Gradle Wrapper:"
+            echo ""
+            echo "Gradle Wrapper FOUND:"
             echo "$GRADLEW"
 
-          else
+            echo "project_dir=$PROJECT_DIR" >> "$GITHUB_OUTPUT"
 
-            SETTINGS=$(find extracted \
-              -type f \
-              -name "settings.gradle" \
-              -o -name "settings.gradle.kts" \
-              -print \
-              -quit)
-
-            if [ -n "$SETTINGS" ]; then
-
-              PROJECT_DIR=$(dirname "$SETTINGS")
-
-            else
-
-              BUILD=$(find extracted \
-                -type f \
-                -name "build.gradle" \
-                -o -name "build.gradle.kts" \
-                -print \
-                -quit)
-
-              if [ -z "$BUILD" ]; then
-
-                echo "ERROR: Gradle project not found."
-
-                find extracted -maxdepth 8 -type f | sort
-
-                exit 1
-
-              fi
-
-              PROJECT_DIR=$(dirname "$BUILD")
-
-            fi
+            exit 0
 
           fi
 
-          echo ""
-          echo "PROJECT DIRECTORY:"
-          echo "$PROJECT_DIR"
 
-          echo "project_dir=$PROJECT_DIR" >> "$GITHUB_OUTPUT"
+          SETTINGS=$(find extracted -type f -name "settings.gradle" -print | head -n 1)
+
+          if [ -z "$SETTINGS" ]; then
+            SETTINGS=$(find extracted -type f -name "settings.gradle.kts" -print | head -n 1)
+          fi
+
+
+          if [ -n "$SETTINGS" ]; then
+
+            PROJECT_DIR=$(dirname "$SETTINGS")
+
+            echo ""
+            echo "Gradle settings FOUND:"
+            echo "$SETTINGS"
+
+            echo "project_dir=$PROJECT_DIR" >> "$GITHUB_OUTPUT"
+
+            exit 0
+
+          fi
+
+
+          BUILD=$(find extracted -type f -name "build.gradle" -print | head -n 1)
+
+          if [ -z "$BUILD" ]; then
+            BUILD=$(find extracted -type f -name "build.gradle.kts" -print | head -n 1)
+          fi
+
+
+          if [ -n "$BUILD" ]; then
+
+            PROJECT_DIR=$(dirname "$BUILD")
+
+            echo ""
+            echo "Gradle build file FOUND:"
+            echo "$BUILD"
+
+            echo "project_dir=$PROJECT_DIR" >> "$GITHUB_OUTPUT"
+
+            exit 0
+
+          fi
+
+
+          echo ""
+          echo "ERROR: Android Gradle project was not found."
+
+          echo ""
+          echo "Files inside ZIP:"
+
+          find extracted -maxdepth 8 -type f -print
+
+          exit 1
 
 
       # ==========================================
@@ -158,7 +171,7 @@ jobs:
         uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: '17'
+          java-version: "17"
 
 
       # ==========================================
@@ -179,90 +192,225 @@ jobs:
 
           PROJECT="${{ steps.project.outputs.project_dir }}"
 
+          echo "======================================"
+          echo "PROJECT DIRECTORY"
+          echo "======================================"
+
+          echo "$PROJECT"
+
           cd "$PROJECT"
 
-          echo "======================================"
-          echo "Project"
-          echo "======================================"
-
-          pwd
+          echo ""
+          echo "Project files:"
 
           ls -la
 
           if [ -f "./gradlew" ]; then
+
             chmod +x ./gradlew
+
+            echo ""
             echo "Gradle Wrapper detected."
+
           else
+
+            echo ""
             echo "Gradle Wrapper not found."
             echo "System Gradle will be used."
+
           fi
 
 
       # ==========================================
-      # 8. Inspect Build Configuration
+      # 8. Inspect Build Files
       # ==========================================
 
-      - name: Inspect App Build Configuration
+      - name: Inspect Build Configuration
         shell: bash
         run: |
 
           PROJECT="${{ steps.project.outputs.project_dir }}"
 
           echo "======================================"
-          echo "APP BUILD CONFIGURATION"
+          echo "BUILD CONFIGURATION"
           echo "======================================"
 
-          APP_GRADLE="$PROJECT/app/build.gradle"
+          echo ""
+          echo "All Gradle files:"
 
-          if [ ! -f "$APP_GRADLE" ]; then
+          find "$PROJECT" -type f -name "*.gradle" -print
 
-            APP_GRADLE="$PROJECT/app/build.gradle.kts"
+          find "$PROJECT" -type f -name "*.gradle.kts" -print
+
+          echo ""
+          echo "App build.gradle:"
+
+          if [ -f "$PROJECT/app/build.gradle" ]; then
+
+            sed -n '1,180p' "$PROJECT/app/build.gradle"
+
+          elif [ -f "$PROJECT/app/build.gradle.kts" ]; then
+
+            sed -n '1,180p' "$PROJECT/app/build.gradle.kts"
+
+          else
+
+            echo "app/build.gradle was not found."
 
           fi
 
-          if [ ! -f "$APP_GRADLE" ]; then
 
-            echo "ERROR: app/build.gradle not found."
+      # ==========================================
+      # 9. Prepare Android Debug Keystore
+      # ==========================================
 
-            find "$PROJECT" \
-              -maxdepth 4 \
-              -type f \
-              -name "build.gradle" \
-              -o -name "build.gradle.kts" \
-              -print
+      - name: Prepare Debug Keystore
+        shell: bash
+        run: |
+
+          mkdir -p "$HOME/.android"
+
+          if [ ! -f "$HOME/.android/debug.keystore" ]; then
+
+            echo "Creating debug keystore..."
+
+            keytool \
+              -genkeypair \
+              -v \
+              -keystore "$HOME/.android/debug.keystore" \
+              -storepass android \
+              -alias androiddebugkey \
+              -keypass android \
+              -keyalg RSA \
+              -keysize 2048 \
+              -validity 10000 \
+              -dname "CN=Android Debug,O=Android,C=US"
+
+          else
+
+            echo "Debug keystore already exists."
+
+          fi
+
+
+      # ==========================================
+      # 10. Build
+      # ==========================================
+
+      - name: Build SurveyQuant V1.0.56
+        shell: bash
+        run: |
+
+          PROJECT="${{ steps.project.outputs.project_dir }}"
+
+          cd "$PROJECT"
+
+          echo "======================================"
+          echo "BUILDING SURVEYQUANT V1.0.56"
+          echo "======================================"
+
+          if [ -f "./gradlew" ]; then
+
+            chmod +x ./gradlew
+
+            ./gradlew clean assembleDebug --stacktrace
+
+          else
+
+            gradle clean assembleDebug --stacktrace
+
+          fi
+
+
+      # ==========================================
+      # 11. Find APK
+      # ==========================================
+
+      - name: Find Generated APK
+        id: apk
+        shell: bash
+        run: |
+
+          PROJECT="${{ steps.project.outputs.project_dir }}"
+
+          echo "======================================"
+          echo "SEARCHING FOR APK"
+          echo "======================================"
+
+          APK=$(find "$PROJECT" \
+            -type f \
+            -name "*.apk" \
+            -print | head -n 1)
+
+          if [ -z "$APK" ]; then
+
+            echo ""
+            echo "ERROR: APK was not generated."
+
+            find "$PROJECT" -type f -print | tail -n 200
 
             exit 1
 
           fi
 
           echo ""
-          echo "BUILD FILE:"
-          echo "$APP_GRADLE"
+          echo "APK FOUND:"
+          echo "$APK"
 
-          echo ""
-          echo "======================================"
-          echo "BUILD.GRADLE CONTENT"
-          echo "======================================"
-
-          sed -n '1,180p' "$APP_GRADLE"
+          echo "apk=$APK" >> "$GITHUB_OUTPUT"
 
 
       # ==========================================
-      # 9. Prepare Debug Signing
+      # 12. Prepare APK
       # ==========================================
 
-      - name: Prepare Debug Signing
+      - name: Prepare V1.0.56 APK
         shell: bash
         run: |
 
-          PROJECT="${{ steps.project.outputs.project_dir }}"
+          mkdir -p release
 
-          cd "$PROJECT"
+          cp \
+            "${{ steps.apk.outputs.apk }}" \
+            "release/SurveyQuant-V1.0.56-Update.apk"
 
           echo "======================================"
-          echo "Preparing Debug Build"
+          echo "APK READY"
           echo "======================================"
 
-          mkdir -p "$HOME/.android"
+          ls -lh release/
 
-          if [ ! -f "$HOME/.android/debug.keystore" ]; then
+
+      # ==========================================
+      # 13. Upload APK
+      # ==========================================
+
+      - name: Upload SurveyQuant V1.0.56
+        uses: actions/upload-artifact@v4
+        with:
+          name: SurveyQuant-V1.0.56-Update-Chain
+          path: release/SurveyQuant-V1.0.56-Update.apk
+          if-no-files-found: error
+
+
+      # ==========================================
+      # 14. Summary
+      # ==========================================
+
+      - name: Build Summary
+        if: success()
+        run: |
+
+          echo ""
+          echo "======================================"
+          echo "SURVEYQUANT V1.0.56"
+          echo "BUILD SUCCESSFUL"
+          echo "======================================"
+          echo ""
+          echo "APK:"
+          echo "SurveyQuant-V1.0.56-Update.apk"
+          echo ""
+          echo "Artifact:"
+          echo "SurveyQuant-V1.0.56-Update-Chain"
+          echo ""
+          echo "======================================"
