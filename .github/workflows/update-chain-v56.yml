@@ -8,7 +8,9 @@ permissions:
 
 jobs:
   update-chain-v56:
+
     name: SurveyQuant V1.0.56 Update Chain
+
     runs-on: ubuntu-latest
 
     steps:
@@ -27,69 +29,134 @@ jobs:
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v6
 
-      - name: Grant Gradle Permission
-        run: chmod +x ./gradlew
-
-      - name: Verify Current Version
+      - name: Detect Android Project
+        id: detect
+        shell: bash
         run: |
           echo "======================================"
-          echo "SurveyQuant V1.0.56 Update Chain"
+          echo "Searching for Gradle Wrapper..."
           echo "======================================"
-          echo "Repository:"
-          git remote -v
-          echo ""
-          echo "Branch:"
-          git branch --show-current
-          echo ""
-          echo "Commit:"
-          git rev-parse --short HEAD
 
-      - name: Clean Previous Build
-        run: |
-          ./gradlew clean
+          GRADLEW=$(find . -type f -name "gradlew" -print -quit)
 
-      - name: Build Update APK
-        run: |
-          ./gradlew assembleDebug --stacktrace
-
-      - name: Locate APK
-        run: |
-          echo "======================================"
-          echo "Generated APK Files"
-          echo "======================================"
-          find . -type f -name "*.apk" -print
-
-      - name: Rename APK
-        run: |
-          APK=$(find . -type f -name "*.apk" | head -n 1)
-
-          if [ -z "$APK" ]; then
-            echo "ERROR: APK was not generated."
+          if [ -z "$GRADLEW" ]; then
+            echo ""
+            echo "ERROR: gradlew was not found."
+            echo ""
+            echo "Repository structure:"
+            find . -maxdepth 4 -type f | sort | head -300
+            echo ""
+            echo "This repository does not contain a Gradle Wrapper."
             exit 1
           fi
 
+          PROJECT_DIR=$(dirname "$GRADLEW")
+
+          echo "Gradle Wrapper found:"
+          echo "$GRADLEW"
+
+          echo "Project directory:"
+          echo "$PROJECT_DIR"
+
+          echo "project_dir=$PROJECT_DIR" >> "$GITHUB_OUTPUT"
+
+      - name: Grant Gradle Permission
+        run: |
+          chmod +x "${{ steps.detect.outputs.project_dir }}/gradlew"
+
+      - name: Verify Project
+        run: |
+          cd "${{ steps.detect.outputs.project_dir }}"
+
+          echo "======================================"
+          echo "SurveyQuant V1.0.56"
+          echo "======================================"
+
+          echo "Current directory:"
+          pwd
+
+          echo ""
+          echo "Project files:"
+          ls -la
+
+          echo ""
+          echo "Gradle version:"
+          ./gradlew --version
+
+      - name: Clean Previous Build
+        run: |
+          cd "${{ steps.detect.outputs.project_dir }}"
+          ./gradlew clean --stacktrace
+
+      - name: Build Debug APK
+        run: |
+          cd "${{ steps.detect.outputs.project_dir }}"
+          ./gradlew assembleDebug --stacktrace
+
+      - name: Find Generated APK
+        id: apk
+        shell: bash
+        run: |
+          PROJECT_DIR="${{ steps.detect.outputs.project_dir }}"
+
+          echo "======================================"
+          echo "Searching for generated APK..."
+          echo "======================================"
+
+          find "$PROJECT_DIR" \
+            -type f \
+            -name "*.apk" \
+            -print
+
+          APK=$(find "$PROJECT_DIR" \
+            -type f \
+            -path "*/build/outputs/apk/debug/*.apk" \
+            -print \
+            -quit)
+
+          if [ -z "$APK" ]; then
+            echo ""
+            echo "ERROR: Debug APK was not generated."
+            exit 1
+          fi
+
+          echo ""
+          echo "APK found:"
+          echo "$APK"
+
+          echo "apk=$APK" >> "$GITHUB_OUTPUT"
+
+      - name: Prepare V1.0.56 Update APK
+        shell: bash
+        run: |
           mkdir -p release
 
-          cp "$APK" "release/SurveyQuant-V1.0.56-Update.apk"
+          cp "${{ steps.apk.outputs.apk }}" \
+             "release/SurveyQuant-V1.0.56-Update.apk"
 
-          echo "APK:"
+          echo "======================================"
+          echo "SurveyQuant V1.0.56 Update"
+          echo "======================================"
+
           ls -lh release/
 
-      - name: Upload Update APK
+      - name: Upload V1.0.56 APK
         uses: actions/upload-artifact@v4
         with:
           name: SurveyQuant-V1.0.56-Update-Chain
           path: release/SurveyQuant-V1.0.56-Update.apk
           if-no-files-found: error
 
-      - name: Create Update Tag
+      - name: Build Summary
+        if: success()
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-
-          if git rev-parse "v1.0.56" >/dev/null 2>&1; then
-            echo "Tag v1.0.56 already exists."
-          else
-            git tag -a "v1.0.56" -m "SurveyQuant V1.0.56 Update Chain"
-            git push origin "v1.0.56"
-          fi
+          echo "======================================"
+          echo "BUILD SUCCESSFUL"
+          echo "======================================"
+          echo ""
+          echo "SurveyQuant V1.0.56"
+          echo ""
+          echo "APK:"
+          echo "SurveyQuant-V1.0.56-Update.apk"
+          echo ""
+          echo "Update Chain: READY"
