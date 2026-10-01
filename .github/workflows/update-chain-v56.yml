@@ -73,10 +73,6 @@ jobs:
           echo ""
           echo "Extraction completed."
 
-          echo ""
-          echo "Extracted project:"
-          find extracted -maxdepth 5 -type f | head -n 300
-
 
       # ==========================================
       # 4. Detect Android Project
@@ -97,70 +93,47 @@ jobs:
 
             PROJECT_DIR=$(dirname "$GRADLEW")
 
-            echo ""
-            echo "Gradle Wrapper FOUND:"
-            echo "$GRADLEW"
+          else
 
-            echo "project_dir=$PROJECT_DIR" >> "$GITHUB_OUTPUT"
+            SETTINGS=$(find extracted -type f -name "settings.gradle" -print | head -n 1)
 
-            exit 0
+            if [ -z "$SETTINGS" ]; then
+              SETTINGS=$(find extracted -type f -name "settings.gradle.kts" -print | head -n 1)
+            fi
 
-          fi
+            if [ -n "$SETTINGS" ]; then
 
+              PROJECT_DIR=$(dirname "$SETTINGS")
 
-          SETTINGS=$(find extracted -type f -name "settings.gradle" -print | head -n 1)
+            else
 
-          if [ -z "$SETTINGS" ]; then
-            SETTINGS=$(find extracted -type f -name "settings.gradle.kts" -print | head -n 1)
-          fi
+              BUILD=$(find extracted -type f -name "build.gradle" -print | head -n 1)
 
+              if [ -z "$BUILD" ]; then
+                BUILD=$(find extracted -type f -name "build.gradle.kts" -print | head -n 1)
+              fi
 
-          if [ -n "$SETTINGS" ]; then
+              if [ -z "$BUILD" ]; then
 
-            PROJECT_DIR=$(dirname "$SETTINGS")
+                echo "ERROR: Gradle project not found."
 
-            echo ""
-            echo "Gradle settings FOUND:"
-            echo "$SETTINGS"
+                find extracted -maxdepth 8 -type f -print
 
-            echo "project_dir=$PROJECT_DIR" >> "$GITHUB_OUTPUT"
+                exit 1
 
-            exit 0
+              fi
 
-          fi
+              PROJECT_DIR=$(dirname "$BUILD")
 
-
-          BUILD=$(find extracted -type f -name "build.gradle" -print | head -n 1)
-
-          if [ -z "$BUILD" ]; then
-            BUILD=$(find extracted -type f -name "build.gradle.kts" -print | head -n 1)
-          fi
-
-
-          if [ -n "$BUILD" ]; then
-
-            PROJECT_DIR=$(dirname "$BUILD")
-
-            echo ""
-            echo "Gradle build file FOUND:"
-            echo "$BUILD"
-
-            echo "project_dir=$PROJECT_DIR" >> "$GITHUB_OUTPUT"
-
-            exit 0
+            fi
 
           fi
-
 
           echo ""
-          echo "ERROR: Android Gradle project was not found."
+          echo "PROJECT DIRECTORY:"
+          echo "$PROJECT_DIR"
 
-          echo ""
-          echo "Files inside ZIP:"
-
-          find extracted -maxdepth 8 -type f -print
-
-          exit 1
+          echo "project_dir=$PROJECT_DIR" >> "$GITHUB_OUTPUT"
 
 
       # ==========================================
@@ -183,7 +156,96 @@ jobs:
 
 
       # ==========================================
-      # 7. Prepare Gradle
+      # 7. Create CI Keystore
+      # ==========================================
+
+      - name: Create CI Signing Keystore
+        shell: bash
+        run: |
+
+          echo "======================================"
+          echo "Creating CI Signing Keystore"
+          echo "======================================"
+
+          mkdir -p "$GITHUB_WORKSPACE/signing"
+
+          keytool \
+            -genkeypair \
+            -v \
+            -keystore "$GITHUB_WORKSPACE/signing/surveyquant-ci.jks" \
+            -storetype JKS \
+            -storepass "SurveyQuantCIStore2026" \
+            -alias "surveyquant" \
+            -keypass "SurveyQuantCIKey2026" \
+            -keyalg RSA \
+            -keysize 2048 \
+            -validity 10000 \
+            -dname "CN=SurveyQuant,O=SurveyQuant,C=EG"
+
+          echo ""
+          echo "Keystore created."
+
+          ls -lh "$GITHUB_WORKSPACE/signing/"
+
+
+      # ==========================================
+      # 8. Configure Signing Environment
+      # ==========================================
+
+      - name: Configure SurveyQuant Signing
+        shell: bash
+        run: |
+
+          echo "======================================"
+          echo "Configuring SurveyQuant Signing"
+          echo "======================================"
+
+          echo "SURVEYQUANT_KEYSTORE_FILE=$GITHUB_WORKSPACE/signing/surveyquant-ci.jks" >> "$GITHUB_ENV"
+
+          echo "SURVEYQUANT_KEYSTORE_PASSWORD=SurveyQuantCIStore2026" >> "$GITHUB_ENV"
+
+          echo "SURVEYQUANT_KEY_ALIAS=surveyquant" >> "$GITHUB_ENV"
+
+          echo "SURVEYQUANT_KEY_PASSWORD=SurveyQuantCIKey2026" >> "$GITHUB_ENV"
+
+          echo "Signing variables configured."
+
+
+      # ==========================================
+      # 9. Verify Signing Configuration
+      # ==========================================
+
+      - name: Verify Signing Configuration
+        shell: bash
+        run: |
+
+          echo "======================================"
+          echo "VERIFYING SIGNING"
+          echo "======================================"
+
+          if [ -f "$SURVEYQUANT_KEYSTORE_FILE" ]; then
+
+            echo "Keystore file exists."
+
+          else
+
+            echo "ERROR: Keystore file does not exist."
+
+            exit 1
+
+          fi
+
+          echo ""
+          echo "Keystore path:"
+          echo "$SURVEYQUANT_KEYSTORE_FILE"
+
+          echo ""
+          echo "Alias:"
+          echo "$SURVEYQUANT_KEY_ALIAS"
+
+
+      # ==========================================
+      # 10. Prepare Gradle
       # ==========================================
 
       - name: Prepare Gradle
@@ -192,16 +254,13 @@ jobs:
 
           PROJECT="${{ steps.project.outputs.project_dir }}"
 
-          echo "======================================"
-          echo "PROJECT DIRECTORY"
-          echo "======================================"
-
-          echo "$PROJECT"
-
           cd "$PROJECT"
 
-          echo ""
-          echo "Project files:"
+          echo "======================================"
+          echo "PROJECT"
+          echo "======================================"
+
+          pwd
 
           ls -la
 
@@ -209,12 +268,10 @@ jobs:
 
             chmod +x ./gradlew
 
-            echo ""
             echo "Gradle Wrapper detected."
 
           else
 
-            echo ""
             echo "Gradle Wrapper not found."
             echo "System Gradle will be used."
 
@@ -222,79 +279,32 @@ jobs:
 
 
       # ==========================================
-      # 8. Inspect Build Files
+      # 11. Show Signing Configuration
       # ==========================================
 
-      - name: Inspect Build Configuration
+      - name: Show Signing Configuration
         shell: bash
         run: |
 
           PROJECT="${{ steps.project.outputs.project_dir }}"
 
           echo "======================================"
-          echo "BUILD CONFIGURATION"
+          echo "APP BUILD CONFIGURATION"
           echo "======================================"
-
-          echo ""
-          echo "All Gradle files:"
-
-          find "$PROJECT" -type f -name "*.gradle" -print
-
-          find "$PROJECT" -type f -name "*.gradle.kts" -print
-
-          echo ""
-          echo "App build.gradle:"
 
           if [ -f "$PROJECT/app/build.gradle" ]; then
 
-            sed -n '1,180p' "$PROJECT/app/build.gradle"
+            sed -n '1,80p' "$PROJECT/app/build.gradle"
 
           elif [ -f "$PROJECT/app/build.gradle.kts" ]; then
 
-            sed -n '1,180p' "$PROJECT/app/build.gradle.kts"
-
-          else
-
-            echo "app/build.gradle was not found."
+            sed -n '1,80p' "$PROJECT/app/build.gradle.kts"
 
           fi
 
 
       # ==========================================
-      # 9. Prepare Android Debug Keystore
-      # ==========================================
-
-      - name: Prepare Debug Keystore
-        shell: bash
-        run: |
-
-          mkdir -p "$HOME/.android"
-
-          if [ ! -f "$HOME/.android/debug.keystore" ]; then
-
-            echo "Creating debug keystore..."
-
-            keytool \
-              -genkeypair \
-              -v \
-              -keystore "$HOME/.android/debug.keystore" \
-              -storepass android \
-              -alias androiddebugkey \
-              -keypass android \
-              -keyalg RSA \
-              -keysize 2048 \
-              -validity 10000 \
-              -dname "CN=Android Debug,O=Android,C=US"
-
-          else
-
-            echo "Debug keystore already exists."
-
-          fi
-
-
-      # ==========================================
-      # 10. Build
+      # 12. Build SurveyQuant V1.0.56
       # ==========================================
 
       - name: Build SurveyQuant V1.0.56
@@ -323,7 +333,7 @@ jobs:
 
 
       # ==========================================
-      # 11. Find APK
+      # 13. Find APK
       # ==========================================
 
       - name: Find Generated APK
@@ -344,10 +354,7 @@ jobs:
 
           if [ -z "$APK" ]; then
 
-            echo ""
             echo "ERROR: APK was not generated."
-
-            find "$PROJECT" -type f -print | tail -n 200
 
             exit 1
 
@@ -361,7 +368,7 @@ jobs:
 
 
       # ==========================================
-      # 12. Prepare APK
+      # 14. Prepare APK
       # ==========================================
 
       - name: Prepare V1.0.56 APK
@@ -382,7 +389,7 @@ jobs:
 
 
       # ==========================================
-      # 13. Upload APK
+      # 15. Upload APK
       # ==========================================
 
       - name: Upload SurveyQuant V1.0.56
@@ -394,7 +401,7 @@ jobs:
 
 
       # ==========================================
-      # 14. Summary
+      # 16. Summary
       # ==========================================
 
       - name: Build Summary
